@@ -169,7 +169,7 @@ export interface MediaHelloAck {
   resumeTtlSeconds: number;
   /** false => the lane degrades; the UI shows its unsupported state. */
   mediaSupported: boolean;
-  /** Typed: "protocol","disabled_by_policy","no_host_capability". */
+  /** Typed: "protocol","disabled_by_policy","no_sender_capability". */
   mediaUnsupportedReason: string;
 }
 
@@ -193,7 +193,7 @@ export interface MediaResume {
 export interface MediaResumeAck {
   accepted: boolean;
   /**
-   * "ok","unknown_session","token_expired","token_invalid","viewer_mismatch",
+   * "ok","unknown_session","token_expired","token_invalid","peer_mismatch",
    * "epoch_stale","epoch_mismatch","park_evicted".
    */
   reason: string;

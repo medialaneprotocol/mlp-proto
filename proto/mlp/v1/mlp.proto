@@ -178,7 +178,7 @@ message MediaHelloAck {
   uint32 resume_ttl_seconds = 8;
   // false => the lane degrades; the UI shows its unsupported state.
   bool   media_supported = 9;
-  // Typed: "protocol","disabled_by_policy","no_host_capability".
+  // Typed: "protocol","disabled_by_policy","no_sender_capability".
   string media_unsupported_reason = 10;
 }
 
@@ -201,7 +201,7 @@ message MediaResume {
 // `MediaResumeAck` (spec §6.3).
 message MediaResumeAck {
   bool   accepted = 1;
-  // "ok","unknown_session","token_expired","token_invalid","viewer_mismatch",
+  // "ok","unknown_session","token_expired","token_invalid","peer_mismatch",
   // "epoch_stale","epoch_mismatch","park_evicted".
   string reason = 2;
   // The update id the sender will use next for this receiver.
