@@ -1,0 +1,283 @@
+syntax = "proto3";
+
+package mlp.v1;
+
+// The Media Lane Protocol (MLP) — class bodies.
+//
+// The fragment header, the TLV registry and the object lifecycle are NOT
+// protobuf: they are the byte-level MLP grammar defined by the specification
+// and implemented by `mlp-core` (`media::pdu`, `media::object`). This file
+// defines only the *class-specific bodies* a peer may need to decode:
+//
+//   * `class = CONTROL`  -> `MediaControlObject` (the oneof below);
+//   * `class = FEEDBACK` -> a bare `MediaAck`, `MediaFeedback`,
+//                           `MediaHopReport` or `ProbeEcho`;
+//   * `class = CURSOR`   -> a bare `MediaCursor`;
+//   * `class = MEDIA`    -> opaque bytes. The protocol does not interpret
+//                           them; a codec does.
+//
+// A hop that only forwards objects never needs the MEDIA body: it coalesces
+// by the MLP header TLVs and replays the original fragment bytes.
+//
+// Field numbers and types are the specification's normative tables. A
+// `MediaHopReport` and a `MediaProbe` are carried wire-identically by every
+// hop, so a report stamped by one hop decodes with the type below and vice
+// versa.
+
+// `MediaCursor` (spec §6.2): unordered, latest-wins, never retransmitted.
+// Validation: `shape_rgba.len() <= 8192`; the position is clamped by the
+// receiver, never rejected (a cursor outside the surface is normal during a
+// geometry change).
+message MediaCursor {
+  int32  x = 1;
+  int32  y = 2;
+  bool   visible = 3;
+  // The receiver's local cursor shape generation; 0 = keep the local shape.
+  uint32 shape_seq = 4;
+  // Sender-relative ms of the position sample.
+  uint64 epoch_ms = 5;
+  // Only when `shape_seq` changes from 0.
+  uint32 hot_spot_x = 6;
+  uint32 hot_spot_y = 7;
+  // Optional, <= 8 KiB; a receiver that does not decode it keeps its local
+  // shape.
+  bytes  shape_rgba = 8;
+}
+
+// `MediaAck` (spec §6.2): a selective bitmap over a 64-update window.
+message MediaAck {
+  // 0 = nothing applied yet.
+  uint64 highest_applied_update_id = 1;
+  // Bit i = applied update (highest - i), i in 0..64.
+  uint64 ack_bitmap = 2;
+  uint32 chain_epoch = 3;
+  // The receiver's repair-cell grid size.
+  uint32 applied_cell_count = 4;
+  // The receiver's own count of cells it believes stale.
+  uint32 stale_cells = 5;
+  // The receiver's belief; the sender's accounting is authoritative.
+  bool   converged = 6;
+  double render_latency_ms = 7;
+  bool   has_render_latency_ms = 8;
+  // The highest input_seq visible in the applied content.
+  uint64 echo_of_input_seq = 9;
+  // Sender-relative ms when this ack was produced.
+  uint64 ack_epoch_ms = 10;
+}
+
+// `MediaFeedback` (spec §6.2): the receiver's only quality channel.
+message MediaFeedback {
+  // The receiver's measured RTT (clamped 1..60000).
+  uint32 rtt_ms = 1;
+  // The receiver's running minimum.
+  uint32 rtt_min_ms = 2;
+  uint32 jitter_ms = 3;
+  // Payload bytes received since the previous report.
+  uint64 received_bytes = 4;
+  uint64 received_objects = 5;
+  // Gaps in object_id since the previous report.
+  uint64 lost_objects = 6;
+  uint64 duplicated_objects = 7;
+  uint64 reordered_objects = 8;
+  // The interval these counters cover.
+  uint64 window_ms = 9;
+  MediaAck ack = 10;
+  repeated ProbeEcho probes = 11;
+  // The receiver's own outbound backlog (diagnostics).
+  uint32 buffered_amount_bytes = 12;
+  uint32 display_fps = 13;
+  uint32 render_ms_p50 = 14;
+  uint32 render_ms_p95 = 15;
+  uint32 input_queue_depth = 16;
+  uint64 input_submitted = 17;
+  uint64 input_expired = 18;
+  uint64 path_switches = 19;
+  // MediaPath: 0=unknown, 1=ws, 2=dc-direct, 3=dc-turn, 4=quic.
+  uint32 active_path = 20;
+  // Diagnostics only; never parsed for behaviour.
+  string app_version = 21;
+}
+
+// `ProbeEcho` (spec §6.2): the echo of a probe, correlated by object id.
+message ProbeEcho {
+  uint32 object_id = 1;
+  uint64 send_epoch_ms = 2;
+  uint64 echo_epoch_ms = 3;
+  uint32 payload_bytes = 4;
+}
+
+// `MediaHopReport` (spec §6.2): what an intermediary hop dropped.
+// `hop`: 1=first intermediary, 2=edge (extensible: 3=dc, 4=turn).
+message MediaHopReport {
+  uint32 hop = 1;
+  uint64 objects_dropped = 2;
+  uint64 bytes_dropped = 3;
+  uint64 coalesced = 4;
+  uint32 queue_depth_peak = 5;
+  uint32 queue_depth_current = 6;
+  uint32 window_ms = 7;
+  // The hop's own RTT to the next hop, when it measures one.
+  uint32 rtt_ms_own = 8;
+  // Total ms this hop's writer waited on capacity.
+  uint32 backpressure_ms = 9;
+}
+
+// `MediaProbe` (spec §6.2): a path probe; never carries payload.
+message MediaProbe {
+  uint32 probe_id = 1;
+  uint32 payload_bytes = 2;
+  uint64 send_epoch_ms = 3;
+}
+
+// `MediaControlObject` (spec §6.3): the CONTROL-class oneof wrapper.
+message MediaControlObject {
+  oneof body {
+    MediaHello       hello = 1;
+    MediaHelloAck    hello_ack = 2;
+    MediaResume      resume = 3;
+    MediaResumeAck   resume_ack = 4;
+    MediaLaneState   lane_state = 5;
+    MediaAnchorPlan  anchor_plan = 6;
+    MediaClose       close = 7;
+    MediaError       error = 8;
+    MediaPathChange  path_change = 9;
+  }
+}
+
+// `MediaHello` (spec §6.3): the first object a media lane sends.
+message MediaHello {
+  // 1.
+  uint32 protocol_version = 1;
+  // "" for a fresh session; non-empty only in a resume.
+  string media_session_id = 2;
+  // The control-lane session id.
+  string session_id = 3;
+  // The sender's cap (1150 on a datagram carrier, 65536 on a stream carrier).
+  uint32 max_fragment_payload = 4;
+  // The sender's repair-cell grid.
+  uint32 cell_size = 5;
+  uint32 cell_cols = 6;
+  uint32 cell_rows = 7;
+  // "anchor","patch","dc","hop_report","probe","cursor","dupe".
+  repeated string capabilities = 8;
+  uint32 encoder_max_fps = 9;
+  uint32 start_epoch_ms = 10;
+}
+
+// `MediaHelloAck` (spec §6.3).
+message MediaHelloAck {
+  uint32 protocol_version = 1;
+  // Assigned here for a fresh session.
+  string media_session_id = 2;
+  // min(sender, receiver).
+  uint32 accepted_fragment_payload = 3;
+  uint32 cell_size = 4;
+  uint32 cell_cols = 5;
+  uint32 cell_rows = 6;
+  repeated string capabilities = 7;
+  uint32 resume_ttl_seconds = 8;
+  // false => the lane degrades; the UI shows its unsupported state.
+  bool   media_supported = 9;
+  // Typed: "protocol","disabled_by_policy","no_host_capability".
+  string media_unsupported_reason = 10;
+}
+
+// `MediaResume` (spec §6.3): what the receiver held when the lane died.
+message MediaResume {
+  // Opaque; never parsed by the browser.
+  string resume_token = 1;
+  uint64 applied_update_id = 2;
+  uint32 chain_epoch = 3;
+  uint64 ack_bitmap = 4;
+  // The receiver's next input seq (dedup boundary).
+  uint64 input_seq_next = 5;
+  repeated uint32 pressed_keys = 6;
+  repeated uint32 pressed_buttons = 7;
+  uint32 active_path = 8;
+  // A fresh negotiation id if the receiver renegotiated.
+  string dc_transport_id = 9;
+}
+
+// `MediaResumeAck` (spec §6.3).
+message MediaResumeAck {
+  bool   accepted = 1;
+  // "ok","unknown_session","token_expired","token_invalid","viewer_mismatch",
+  // "epoch_stale","epoch_mismatch","park_evicted".
+  string reason = 2;
+  // The update id the sender will use next for this receiver.
+  uint64 next_update_id = 3;
+  // Cells the sender will re-send (diagnostics; the plan follows in updates).
+  uint64 pending_cells = 4;
+  uint32 pace_bps = 5;
+  uint32 budget_bytes = 6;
+  uint32 target_fps = 7;
+  // true when the resume had to start a plan (e.g. an epoch mismatch).
+  bool   anchor_plan_started = 8;
+}
+
+// `MediaLaneState` (spec §6.3).
+// state: 0=STARTING, 1=LIVE, 2=DEGRADED, 3=CONVERGING, 4=STALE, 5=PARKED,
+//        6=DISABLED, 7=DECODE_BOUND, 8=NO_FEEDBACK, 9=MEDIA_UNSUPPORTED.
+message MediaLaneState {
+  uint32 state = 1;
+  uint32 since_epoch_ms = 2;
+  string detail = 3;
+}
+
+// `MediaAnchorPlan` (spec §6.3, §7.6).
+message MediaAnchorPlan {
+  uint32 plan_id = 1;
+  uint32 total_updates_estimate = 2;
+  uint32 total_cells = 3;
+  uint32 priority = 4;
+}
+
+// `MediaClose` (spec §6.3).
+// code: 0=normal, 1=server_shutdown, 2=policy, 3=superseded, 4=park.
+message MediaClose {
+  uint32 code = 1;
+  string reason = 2;
+  // true is the "come back" signal of the session-continuity rules.
+  bool park = 3;
+}
+
+// `MediaError` (spec §6.3).
+// code: 1=BAD_MAGIC, 2=UNSUPPORTED_VERSION, 3=BAD_CLASS, 4=BAD_FLAGS,
+//       5=BAD_PRIORITY, 6=BAD_FRAGMENT, 7=BAD_LENGTH, 8=BAD_EXT,
+//       9=META_MISMATCH, 10=ASSEMBLY_TIMEOUT, 11=ASSEMBLY_EVICTED,
+//       12=OBJECT_ID_WRAP, 13=BODY_INVALID, 14=RATE_LIMITED, 15=LANE_DISABLED.
+message MediaError {
+  uint32 code = 1;
+  uint32 object_id = 2;
+  string detail = 3;
+}
+
+// `MediaPathChange` (spec §6.3, §7.8).
+// from_path/to_path: 0=unknown, 1=ws, 2=dc-direct, 3=dc-turn, 4=quic.
+message MediaPathChange {
+  uint32 from_path = 1;
+  uint32 to_path = 2;
+  string reason = 3;
+  uint64 at_epoch_ms = 4;
+}
+
+// `MediaInputEnvelope` (spec §9.1): the transport wrapper around an input
+// object on the control lane.
+//
+// `kind` and `flags` are transport-level so every hop can coalesce or drop an
+// input object without decoding the payload. The wrapped object's own
+// serialized payload travels in `payload`, unchanged.
+//
+// kind: 0=pointer_move, 1=pointer_button, 2=key, 3=wheel, 4=clipboard,
+//       5=release_all, 6=pressed_set.
+// flags: bit0 RELEASE, bit1 REPEAT, bit2 CRITICAL (never drop).
+message MediaInputEnvelope {
+  // Monotonic per receiver epoch, starts at nothing (opaque u64).
+  uint64 input_seq = 1;
+  // Session-relative absolute deadline; 0 = never expires.
+  uint64 deadline_epoch_ms = 2;
+  uint32 kind = 3;
+  uint32 flags = 4;
+  // The input object's own serialized payload (unchanged).
+  bytes  payload = 5;
+}
