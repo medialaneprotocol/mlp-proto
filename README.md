@@ -48,6 +48,11 @@ regenerates byte-identical output.
 3. Update the specification's normative tables in the same change.
 4. Bump the protocol version if the change is not backward compatible.
 
+## Status
+
+In development. One moving version, `v0.1.0`, naming the current commit:
+there is exactly one tag, and a change moves it.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
@@ -56,3 +61,13 @@ The reference implementations under
 [`mlp-core`](../mlp-core) and [`mlp-ts`](../mlp-ts) are under
 PolyForm Noncommercial 1.0.0; this schema is not, so any implementation may
 interoperate with them.
+
+## The sibling repositories
+
+| repository | what it holds |
+|---|---|
+| [`mlp`](https://github.com/medialaneprotocol/mlp) | the normative specification |
+| [`mlp-core`](https://github.com/medialaneprotocol/mlp-core) | the Rust reference implementation, and the protocol's command-line tool |
+| [`mlp-ts`](https://github.com/medialaneprotocol/mlp-ts) | the browser reference implementation |
+| [`mlp-proto`](https://github.com/medialaneprotocol/mlp-proto) | the class bodies' wire schemas |
+| [`mlp-conformance`](https://github.com/medialaneprotocol/mlp-conformance) | the conformance corpus and its gate |
